@@ -78,8 +78,9 @@ jobs:
               }
             },
             "ai": {
-              "provider": "${{ vars.AI_PROVIDER || 'gemini' }}",
-              "model": "${{ vars.AI_MODEL || 'gemini-1.5-flash' }}",
+              "provider": "openai",
+              "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+              "model": "kimi-k2.5",
               "score_threshold": 6.0,
               "max_concurrent": 3
             },
