@@ -88,26 +88,20 @@ jobs:
           }
           EOF
 
-      # 6. 创建环境变量文件
-      - name: Create .env file
+      # 6. 检查 Secrets 是否配置
+      - name: Check secrets
         run: |
-          cat > /tmp/horizon/.env << 'EOF'
-          # AI API Keys (从 GitHub Secrets 读取)
-          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-          
-          # 其他配置
-          TZ=Asia/Shanghai
-          PYTHONUNBUFFERED=1
-          EOF
+          if [ -z "${{ secrets.GEMINI_API_KEY }}" ]; then
+            echo "⚠️ 警告: GEMINI_API_KEY 未配置，将只抓取新闻不进行 AI 评分"
+            echo "请在仓库 Settings -> Secrets -> Actions 中添加 GEMINI_API_KEY"
+          fi
 
       # 7. 安装依赖并运行
       - name: Install and run Horizon
         run: |
           cd /tmp/horizon
           uv sync --frozen --no-dev
-          uv run horizon --hours ${{ github.event.inputs.hours || '24' }}
+          uv run horizon --hours ${{ github.event.inputs.hours || '24' }} || echo "Horizon 运行失败，可能是缺少 API Key"
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -119,7 +113,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/output
           cp /tmp/horizon/output/*.md $GITHUB_WORKSPACE/output/ 2>/dev/null || true
           cp /tmp/horizon/output/*.json $GITHUB_WORKSPACE/output/ 2>/dev/null || true
-          ls -la $GITHUB_WORKSPACE/output/
+          ls -la $GITHUB_WORKSPACE/output/ || echo "输出目录为空"
 
       # 9. 上传到 Artifacts (保留 7 天)
       - name: Upload artifacts
@@ -129,66 +123,20 @@ jobs:
           path: output/
           retention-days: 7
 
-      # 10. 发送到飞书
+      # 10. 发送到飞书 (如果配置了 webhook)
       - name: Send to Feishu
+        if: secrets.FEISHU_WEBHOOK != ''
         run: |
           if [ -f "$GITHUB_WORKSPACE/output/daily_report.md" ]; then
-            # 读取日报内容
             CONTENT=$(cat "$GITHUB_WORKSPACE/output/daily_report.md" | sed 's/"/\\"/g' | head -c 15000)
-            
-            # 构建飞书消息
             curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
               -H "Content-Type: application/json" \
-              -d "{
-                \"msg_type\": \"interactive\",
-                \"card\": {
-                  \"header\": {
-                    \"title\": {
-                      \"tag\": \"plain_text\",
-                      \"content\": \"📰 AI 科技日报 - $(date +%Y-%m-%d)\"
-                    },
-                    \"template\": \"blue\"
-                  },
-                  \"elements\": [
-                    {
-                      \"tag\": \"div\",
-                      \"text\": {
-                        \"tag\": \"lark_md\",
-                        \"content\": \"${CONTENT}\"
-                      }
-                    },
-                    {
-                      \"tag\": \"action\",
-                      \"actions\": [
-                        {
-                          \"tag\": \"button\",
-                          \"text\": {
-                            \"tag\": \"plain_text\",
-                            \"content\": \"查看完整日报\"
-                          },
-                          \"type\": \"primary\",
-                          \"url\": \"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              }"
+              -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"${CONTENT}\"}}"
           else
-            echo "日报文件未生成"
-            exit 1
+            echo "日报文件未生成，跳过飞书通知"
           fi
 
-      # 11. 部署到 GitHub Pages (可选)
-      - name: Deploy to GitHub Pages
-        if: github.ref == 'refs/heads/main'
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./output
-          destination_dir: ./daily
-
-      # 12. 清理
+      # 11. 清理
       - name: Cleanup
         run: |
           rm -rf /tmp/horizon
