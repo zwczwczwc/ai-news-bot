@@ -52,9 +52,9 @@ jobs:
             "version": "1.0",
             "ai": {
               "provider": "openai",
-              "model": "qwen-plus",
+              "model": "kimi-k2.5",
               "api_key_env": "DASHSCOPE_API_KEY",
-              "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+              "base_url": "https://coding.dashscope.aliyuncs.com/v1",
               "temperature": 0.3,
               "max_tokens": 4096
             },
