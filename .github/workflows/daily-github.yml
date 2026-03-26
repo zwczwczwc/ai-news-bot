@@ -87,13 +87,14 @@ jobs:
       - name: Save GitHub report
         run: |
           mkdir -p $GITHUB_WORKSPACE/output
-          cp /tmp/horizon/data/summaries/*.md $GITHUB_WORKSPACE/output/github-report.md
+          cp /tmp/horizon/data/summaries/*.md $GITHUB_WORKSPACE/output/report.md
           ls -la $GITHUB_WORKSPACE/output/
 
       - name: Upload to Feishu (GitHub Section)
         run: |
           pip install requests
-          python3 scripts/merge_to_feishu.py "$GITHUB_WORKSPACE/output/github-report.md" "github"
+          export DOC_TITLE="🔥 GitHub 热点项目 - $(date +%Y-%m-%d)"
+          python3 scripts/upload_to_feishu.py
 
       - name: Cleanup
         run: rm -rf /tmp/horizon

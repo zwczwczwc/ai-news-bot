@@ -78,13 +78,14 @@ jobs:
       - name: Save Tech Giants report
         run: |
           mkdir -p $GITHUB_WORKSPACE/output
-          cp /tmp/horizon/data/summaries/*.md $GITHUB_WORKSPACE/output/tech-report.md
+          cp /tmp/horizon/data/summaries/*.md $GITHUB_WORKSPACE/output/report.md
           ls -la $GITHUB_WORKSPACE/output/
 
       - name: Upload to Feishu (Tech Giants Section)
         run: |
           pip install requests
-          python3 scripts/merge_to_feishu.py "$GITHUB_WORKSPACE/output/tech-report.md" "tech"
+          export DOC_TITLE="🏢 科技巨头动态 - $(date +%Y-%m-%d)"
+          python3 scripts/upload_to_feishu.py
 
       - name: Cleanup
         run: rm -rf /tmp/horizon
