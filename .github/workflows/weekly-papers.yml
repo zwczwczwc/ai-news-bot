@@ -6,6 +6,12 @@ on:
     - cron: '0 0 * * 1'
   # 支持手动触发测试
   workflow_dispatch:
+    inputs:
+      hours:
+        description: '抓取过去多少小时的内容'
+        required: false
+        default: '168'
+        type: string
 
 env:
   DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
