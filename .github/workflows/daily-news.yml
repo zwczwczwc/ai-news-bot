@@ -103,6 +103,7 @@ jobs:
       - name: Save output
         run: |
           mkdir -p $GITHUB_WORKSPACE/output
+          cp /tmp/horizon/data/summaries/*.md $GITHUB_WORKSPACE/output/ 2>/dev/null || true
           cp /tmp/horizon/output/* $GITHUB_WORKSPACE/output/ 2>/dev/null || true
           ls -la $GITHUB_WORKSPACE/output/
 
