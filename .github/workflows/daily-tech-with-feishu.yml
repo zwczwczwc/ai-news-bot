@@ -1,0 +1,172 @@
+name: Daily Tech News with Feishu Upload
+
+on:
+  # 每天北京时间 8:00 (UTC 0:00)
+  schedule:
+    - cron: '0 0 * * *'
+  # 支持手动触发测试
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: '抓取过去多少小时的新闻'
+        required: false
+        default: '24'
+        type: string
+
+env:
+  DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+
+jobs:
+  generate-and-upload:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. 设置 Python 环境
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. 安装 uv
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      # 4. 克隆 Horizon
+      - name: Clone Horizon
+        run: git clone https://github.com/zwczwczwc/Horizon.git /tmp/horizon
+
+      # 5. 创建科技新闻配置文件
+      - name: Create Horizon config
+        run: |
+          mkdir -p /tmp/horizon/data
+          cat > /tmp/horizon/data/config.json << 'EOF'
+          {
+            "version": "1.0",
+            "ai": {
+              "provider": "openai",
+              "model": "kimi-k2.5",
+              "api_key_env": "DASHSCOPE_API_KEY",
+              "base_url": "https://coding.dashscope.aliyuncs.com/v1",
+              "temperature": 0.3,
+              "max_tokens": 4096
+            },
+            "sources": {
+              "hackernews": {
+                "enabled": true,
+                "fetch_top_stories": 30,
+                "min_score": 50
+              },
+              "rss": [
+                {
+                  "name": "GitHub Blog",
+                  "url": "https://github.blog/feed/",
+                  "enabled": true,
+                  "category": "github"
+                },
+                {
+                  "name": "Google AI Blog",
+                  "url": "https://blog.google/technology/ai/rss/",
+                  "enabled": true,
+                  "category": "tech-news"
+                },
+                {
+                  "name": "OpenAI Blog",
+                  "url": "https://openai.com/blog/rss.xml",
+                  "enabled": true,
+                  "category": "tech-news"
+                },
+                {
+                  "name": "Anthropic News",
+                  "url": "https://www.anthropic.com/rss.xml",
+                  "enabled": true,
+                  "category": "tech-news"
+                },
+                {
+                  "name": "Microsoft AI Blog",
+                  "url": "https://blogs.microsoft.com/ai/feed/",
+                  "enabled": true,
+                  "category": "tech-news"
+                }
+              ],
+              "reddit": {
+                "enabled": false
+              },
+              "github": [
+                {
+                  "type": "repo_releases",
+                  "owner": "facebook",
+                  "repo": "react",
+                  "enabled": true
+                },
+                {
+                  "type": "repo_releases",
+                  "owner": "microsoft",
+                  "repo": "vscode",
+                  "enabled": true
+                },
+                {
+                  "type": "repo_releases",
+                  "owner": "openai",
+                  "repo": "openai-python",
+                  "enabled": true
+                },
+                {
+                  "type": "repo_releases",
+                  "owner": "vercel",
+                  "repo": "next.js",
+                  "enabled": true
+                }
+              ]
+            },
+            "filtering": {
+              "ai_score_threshold": 6.0,
+              "time_window_hours": 24
+            }
+          }
+          EOF
+
+      # 6. 运行 Horizon
+      - name: Run Horizon
+        run: |
+          cd /tmp/horizon
+          uv sync --frozen --no-dev
+          uv run horizon
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+
+      # 7. 保存输出
+      - name: Save output
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/output
+          cp /tmp/horizon/data/summaries/*.md $GITHUB_WORKSPACE/output/ 2>/dev/null || true
+          ls -la $GITHUB_WORKSPACE/output/
+
+      # 8. 上传到 Artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-tech-news
+          path: output/
+          retention-days: 7
+
+      # 9. 上传到飞书文档
+      - name: Upload to Feishu
+        run: |
+          pip install requests
+          python3 scripts/upload_to_feishu.py
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          REPORT_FILE: output/horizon-$(date +%Y-%m-%d)-en.md
+          DOC_TITLE: "Horizon Tech Daily - $(date +%Y-%m-%d)"
+          OWNER_OPEN_ID: "ou_f80617e98f143959124726775f8ae7d7"
+
+      # 10. 清理
+      - name: Cleanup
+        run: rm -rf /tmp/horizon
