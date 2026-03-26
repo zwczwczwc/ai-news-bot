@@ -1,0 +1,181 @@
+name: Weekly Papers - Horizon
+
+on:
+  # 每周一北京时间 8:00 (UTC 周一 0:00)
+  schedule:
+    - cron: '0 0 * * 1'
+  # 支持手动触发测试
+  workflow_dispatch:
+
+env:
+  DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+
+jobs:
+  generate-papers:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. 设置 Python 环境
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. 安装 uv
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      # 4. 克隆 Horizon
+      - name: Clone Horizon
+        run: git clone https://github.com/zwczwczwc/Horizon.git /tmp/horizon
+
+      # 5. 创建论文配置文件
+      - name: Create Horizon config
+        run: |
+          mkdir -p /tmp/horizon/data
+          cat > /tmp/horizon/data/config.json << 'EOF'
+          {
+            "version": "1.0",
+            "ai": {
+              "provider": "openai",
+              "model": "kimi-k2.5",
+              "api_key_env": "DASHSCOPE_API_KEY",
+              "base_url": "https://coding.dashscope.aliyuncs.com/v1",
+              "temperature": 0.3,
+              "max_tokens": 4096
+            },
+            "sources": {
+              "hackernews": {
+                "enabled": true,
+                "fetch_top_stories": 20,
+                "min_score": 50
+              },
+              "rss": [
+                {
+                  "name": "arXiv AI",
+                  "url": "http://export.arxiv.org/rss/cs.AI",
+                  "enabled": true,
+                  "category": "papers"
+                },
+                {
+                  "name": "arXiv ML",
+                  "url": "http://export.arxiv.org/rss/cs.LG",
+                  "enabled": true,
+                  "category": "papers"
+                },
+                {
+                  "name": "arXiv CL",
+                  "url": "http://export.arxiv.org/rss/cs.CL",
+                  "enabled": true,
+                  "category": "papers"
+                },
+                {
+                  "name": "arXiv CV",
+                  "url": "http://export.arxiv.org/rss/cs.CV",
+                  "enabled": true,
+                  "category": "papers"
+                },
+                {
+                  "name": "Papers with Code",
+                  "url": "https://paperswithcode.com/rss",
+                  "enabled": true,
+                  "category": "papers"
+                },
+                {
+                  "name": "Distill.pub",
+                  "url": "https://distill.pub/rss.xml",
+                  "enabled": true,
+                  "category": "papers"
+                }
+              ],
+              "reddit": {
+                "enabled": false
+              },
+              "github": [
+                {
+                  "type": "user_events",
+                  "username": "karpathy",
+                  "enabled": true
+                },
+                {
+                  "type": "user_events",
+                  "username": "YannLeCun",
+                  "enabled": true
+                },
+                {
+                  "type": "user_events",
+                  "username": "huggingface",
+                  "enabled": true
+                }
+              ]
+            },
+            "filtering": {
+              "ai_score_threshold": 6.0,
+              "time_window_hours": 168
+            }
+          }
+          EOF
+
+      # 6. 运行 Horizon
+      - name: Run Horizon
+        run: |
+          cd /tmp/horizon
+          uv sync --frozen --no-dev
+          uv run horizon
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+
+      # 7. 保存输出
+      - name: Save output
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/output
+          cp /tmp/horizon/data/summaries/*.md $GITHUB_WORKSPACE/output/ 2>/dev/null || true
+          ls -la $GITHUB_WORKSPACE/output/
+
+      # 8. 上传到 Artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-papers
+          path: output/
+          retention-days: 30
+
+      # 9. 发送飞书通知
+      - name: Send Feishu Notification
+        if: success()
+        run: |
+          REPORT_FILE=$(ls $GITHUB_WORKSPACE/output/*.md | head -1)
+          if [ -f "$REPORT_FILE" ]; then
+            # 提取标题和统计信息
+            TITLE=$(head -1 "$REPORT_FILE" | sed 's/# //')
+            STATS=$(grep -E "^>" "$REPORT_FILE" | head -1)
+            
+            # 构建飞书消息
+            MESSAGE="📚 **Horizon 论文周报** - $(date +%Y-%m-%d)
+
+$STATS
+
+📄 本周论文报告已生成，请查看 Artifacts 下载完整内容。
+
+🔗 [GitHub Actions 运行记录](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+---
+*由 Horizon AI News Bot 自动生成*"
+
+            # 发送到飞书（如果配置了 webhook）
+            if [ -n "${{ secrets.FEISHU_WEBHOOK }}" ]; then
+              curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
+                -H "Content-Type: application/json" \
+                -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"${MESSAGE}\"}}"
+            fi
+          fi
+
+      # 10. 清理
+      - name: Cleanup
+        run: rm -rf /tmp/horizon
