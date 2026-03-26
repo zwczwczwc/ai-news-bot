@@ -140,12 +140,18 @@ jobs:
         env:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
 
-      # 7. 保存输出
-      - name: Save output
+      # 7. 保存输出并处理报告
+      - name: Save and process output
         run: |
           mkdir -p $GITHUB_WORKSPACE/output
           cp /tmp/horizon/data/summaries/*.md $GITHUB_WORKSPACE/output/ 2>/dev/null || true
           ls -la $GITHUB_WORKSPACE/output/
+          
+          # 处理报告：分类 + 中文
+          REPORT_FILE=$(ls $GITHUB_WORKSPACE/output/*.md | head -1)
+          if [ -f "$REPORT_FILE" ]; then
+            python3 scripts/process_report.py "$REPORT_FILE"
+          fi
 
       # 8. 上传到 Artifacts
       - name: Upload artifacts
@@ -159,8 +165,12 @@ jobs:
       - name: Upload to Feishu
         run: |
           pip install requests
-          export REPORT_FILE=$(ls output/*.md | head -1)
-          export DOC_TITLE="Horizon Tech Daily - $(date +%Y-%m-%d)"
+          # 使用中文处理后的报告
+          export REPORT_FILE=$(ls output/*-zh.md | head -1)
+          if [ ! -f "$REPORT_FILE" ]; then
+            export REPORT_FILE=$(ls output/*.md | head -1)
+          fi
+          export DOC_TITLE="Horizon 科技日报 - $(date +%Y-%m-%d)"
           python3 scripts/upload_to_feishu.py
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
