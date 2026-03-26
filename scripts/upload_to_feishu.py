@@ -123,6 +123,11 @@ def main():
     doc_title = os.environ.get('DOC_TITLE', f'Horizon Daily - {datetime.now().strftime("%Y-%m-%d")}')
     owner_open_id = os.environ.get('OWNER_OPEN_ID', 'ou_f80617e98f143959124726775f8ae7d7')
     
+    print(f"DEBUG: REPORT_FILE={report_file}")
+    print(f"DEBUG: DOC_TITLE={doc_title}")
+    print(f"DEBUG: APP_ID exists={bool(app_id)}")
+    print(f"DEBUG: APP_SECRET exists={bool(app_secret)}")
+    
     if not app_id or not app_secret:
         print("FEISHU_APP_ID and FEISHU_APP_SECRET required")
         sys.exit(1)
