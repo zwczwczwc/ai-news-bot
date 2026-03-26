@@ -39,9 +39,9 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      # 4. 克隆 Horizon
+      # 4. 克隆 Horizon (使用修复后的 Fork)
       - name: Clone Horizon
-        run: git clone https://github.com/Thysrael/Horizon.git /tmp/horizon
+        run: git clone https://github.com/zwczwczwc/Horizon.git /tmp/horizon
 
       # 5. 创建正确的配置文件
       - name: Create Horizon config
