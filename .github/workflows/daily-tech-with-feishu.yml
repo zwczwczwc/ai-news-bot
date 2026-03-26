@@ -159,12 +159,12 @@ jobs:
       - name: Upload to Feishu
         run: |
           pip install requests
+          export REPORT_FILE=$(ls output/*.md | head -1)
+          export DOC_TITLE="Horizon Tech Daily - $(date +%Y-%m-%d)"
           python3 scripts/upload_to_feishu.py
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
-          REPORT_FILE: output/horizon-$(date +%Y-%m-%d)-en.md
-          DOC_TITLE: "Horizon Tech Daily - $(date +%Y-%m-%d)"
           OWNER_OPEN_ID: "ou_f80617e98f143959124726775f8ae7d7"
 
       # 10. 清理
