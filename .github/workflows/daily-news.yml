@@ -1,0 +1,194 @@
+name: Daily AI News - Horizon
+
+on:
+  # 每天北京时间 8:00 (UTC 0:00)
+  schedule:
+    - cron: '0 0 * * *'
+  # 支持手动触发测试
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: '抓取过去多少小时的新闻'
+        required: false
+        default: '24'
+        type: string
+
+jobs:
+  generate-news:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. 设置 Python 环境
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. 安装 uv (Horizon 使用的包管理器)
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      # 4. 克隆 Horizon 仓库
+      - name: Clone Horizon
+        run: |
+          git clone https://github.com/Thysrael/Horizon.git /tmp/horizon
+          cd /tmp/horizon
+
+      # 5. 创建优化配置 (减少内存占用)
+      - name: Create optimized config
+        run: |
+          mkdir -p /tmp/horizon/data
+          cat > /tmp/horizon/data/config.json << 'EOF'
+          {
+            "sources": {
+              "rss": [
+                "https://news.ycombinator.com/rss",
+                "https://www.reddit.com/r/MachineLearning/.rss",
+                "https://www.reddit.com/r/artificial/.rss",
+                "https://blog.google/technology/ai/rss/"
+              ],
+              "github": {
+                "enabled": true,
+                "repos": [
+                  "microsoft/generative-ai-for-beginners",
+                  "microsoft/promptflow"
+                ]
+              },
+              "telegram": {
+                "enabled": false
+              },
+              "reddit": {
+                "enabled": true,
+                "subreddits": ["MachineLearning", "artificial", "LocalLLaMA"]
+              }
+            },
+            "ai": {
+              "provider": "gemini",
+              "model": "gemini-1.5-flash",
+              "score_threshold": 6.0,
+              "max_concurrent": 3
+            },
+            "output": {
+              "format": "markdown",
+              "language": "zh",
+              "max_items": 20
+            },
+            "features": {
+              "web_search": false,
+              "community_voices": false,
+              "cross_source_dedup": true,
+              "email_subscription": false
+            }
+          }
+          EOF
+
+      # 6. 创建环境变量文件
+      - name: Create .env file
+        run: |
+          cat > /tmp/horizon/.env << 'EOF'
+          # AI API Keys (从 GitHub Secrets 读取)
+          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          
+          # 其他配置
+          TZ=Asia/Shanghai
+          PYTHONUNBUFFERED=1
+          EOF
+
+      # 7. 安装依赖并运行
+      - name: Install and run Horizon
+        run: |
+          cd /tmp/horizon
+          uv sync --frozen --no-dev
+          uv run horizon --hours ${{ github.event.inputs.hours || '24' }}
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      # 8. 保存生成的日报
+      - name: Save output
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/output
+          cp /tmp/horizon/output/*.md $GITHUB_WORKSPACE/output/ 2>/dev/null || true
+          cp /tmp/horizon/output/*.json $GITHUB_WORKSPACE/output/ 2>/dev/null || true
+          ls -la $GITHUB_WORKSPACE/output/
+
+      # 9. 上传到 Artifacts (保留 7 天)
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-news-${{ github.run_number }}
+          path: output/
+          retention-days: 7
+
+      # 10. 发送到飞书
+      - name: Send to Feishu
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/output/daily_report.md" ]; then
+            # 读取日报内容
+            CONTENT=$(cat "$GITHUB_WORKSPACE/output/daily_report.md" | sed 's/"/\\"/g' | head -c 15000)
+            
+            # 构建飞书消息
+            curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"msg_type\": \"interactive\",
+                \"card\": {
+                  \"header\": {
+                    \"title\": {
+                      \"tag\": \"plain_text\",
+                      \"content\": \"📰 AI 科技日报 - $(date +%Y-%m-%d)\"
+                    },
+                    \"template\": \"blue\"
+                  },
+                  \"elements\": [
+                    {
+                      \"tag\": \"div\",
+                      \"text\": {
+                        \"tag\": \"lark_md\",
+                        \"content\": \"${CONTENT}\"
+                      }
+                    },
+                    {
+                      \"tag\": \"action\",
+                      \"actions\": [
+                        {
+                          \"tag\": \"button\",
+                          \"text\": {
+                            \"tag\": \"plain_text\",
+                            \"content\": \"查看完整日报\"
+                          },
+                          \"type\": \"primary\",
+                          \"url\": \"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }"
+          else
+            echo "日报文件未生成"
+            exit 1
+          fi
+
+      # 11. 部署到 GitHub Pages (可选)
+      - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./output
+          destination_dir: ./daily
+
+      # 12. 清理
+      - name: Cleanup
+        run: |
+          rm -rf /tmp/horizon
