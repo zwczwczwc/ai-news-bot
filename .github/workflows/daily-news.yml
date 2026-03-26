@@ -14,13 +14,9 @@ on:
         type: string
 
 env:
-  # 从 Secrets 读取，如果不存在则为空字符串
-  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-  FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-  DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+  # 从 Secrets 读取
   DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+  FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
 
 jobs:
   generate-news:
@@ -37,106 +33,80 @@ jobs:
         with:
           python-version: '3.11'
 
-      # 3. 安装 uv (Horizon 使用的包管理器)
+      # 3. 安装 uv
       - name: Install uv
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      # 4. 克隆 Horizon 仓库
+      # 4. 克隆 Horizon
       - name: Clone Horizon
-        run: |
-          git clone https://github.com/Thysrael/Horizon.git /tmp/horizon
-          cd /tmp/horizon
+        run: git clone https://github.com/Thysrael/Horizon.git /tmp/horizon
 
-      # 5. 创建优化配置 (减少内存占用)
-      - name: Create optimized config
+      # 5. 创建正确的配置文件
+      - name: Create Horizon config
         run: |
           mkdir -p /tmp/horizon/data
           cat > /tmp/horizon/data/config.json << 'EOF'
           {
-            "sources": {
-              "rss": [
-                "https://news.ycombinator.com/rss",
-                "https://www.reddit.com/r/MachineLearning/.rss",
-                "https://www.reddit.com/r/artificial/.rss",
-                "https://blog.google/technology/ai/rss/"
-              ],
-              "github": {
-                "enabled": true,
-                "repos": [
-                  "microsoft/generative-ai-for-beginners",
-                  "microsoft/promptflow"
-                ]
-              },
-              "telegram": {
-                "enabled": false
-              },
-              "reddit": {
-                "enabled": true,
-                "subreddits": ["MachineLearning", "artificial", "LocalLLaMA"]
-              }
-            },
+            "version": "1.0",
             "ai": {
               "provider": "openai",
-              "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
               "model": "kimi-k2.5",
-              "score_threshold": 6.0,
-              "max_concurrent": 3
+              "api_key_env": "DASHSCOPE_API_KEY",
+              "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+              "temperature": 0.3,
+              "max_tokens": 4096
             },
-            "output": {
-              "format": "markdown",
-              "language": "zh",
-              "max_items": 20
+            "sources": {
+              "hackernews": {
+                "enabled": true,
+                "fetch_top_stories": 20,
+                "min_score": 50
+              },
+              "rss": [
+                {
+                  "name": "Hacker News",
+                  "url": "https://news.ycombinator.com/rss",
+                  "enabled": true,
+                  "category": "tech"
+                },
+                {
+                  "name": "Google AI Blog",
+                  "url": "https://blog.google/technology/ai/rss/",
+                  "enabled": true,
+                  "category": "ai"
+                }
+              ],
+              "reddit": {
+                "enabled": false
+              },
+              "github": []
             },
-            "features": {
-              "web_search": false,
-              "community_voices": false,
-              "cross_source_dedup": true,
-              "email_subscription": false
+            "filtering": {
+              "ai_score_threshold": 6.0,
+              "time_window_hours": ${{ github.event.inputs.hours || '24' }}
             }
           }
           EOF
 
-      # 6. 检查可用的 API Key
-      - name: Check API keys
-        run: |
-          echo "检查可用的 AI API..."
-          if [ -n "$GEMINI_API_KEY" ]; then
-            echo "✓ Gemini API Key 已配置"
-          fi
-          if [ -n "$OPENAI_API_KEY" ]; then
-            echo "✓ OpenAI API Key 已配置"
-          fi
-          if [ -n "$ANTHROPIC_API_KEY" ]; then
-            echo "✓ Anthropic API Key 已配置"
-          fi
-          if [ -n "$DEEPSEEK_API_KEY" ]; then
-            echo "✓ DeepSeek API Key 已配置"
-          fi
-          if [ -n "$DASHSCOPE_API_KEY" ]; then
-            echo "✓ DashScope API Key 已配置"
-          fi
-          if [ -z "$GEMINI_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$DEEPSEEK_API_KEY" ] && [ -z "$DASHSCOPE_API_KEY" ]; then
-            echo "⚠️ 警告: 未配置任何 AI API Key，将只抓取新闻不进行 AI 评分"
-          fi
-
-      # 7. 安装依赖并运行
-      - name: Install and run Horizon
+      # 6. 运行 Horizon
+      - name: Run Horizon
         run: |
           cd /tmp/horizon
           uv sync --frozen --no-dev
-          uv run horizon --hours ${{ github.event.inputs.hours || '24' }} || echo "Horizon 运行完成或遇到错误"
+          uv run horizon
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
 
-      # 8. 保存生成的日报
+      # 7. 保存输出
       - name: Save output
         run: |
           mkdir -p $GITHUB_WORKSPACE/output
-          cp /tmp/horizon/output/*.md $GITHUB_WORKSPACE/output/ 2>/dev/null || true
-          cp /tmp/horizon/output/*.json $GITHUB_WORKSPACE/output/ 2>/dev/null || true
-          ls -la $GITHUB_WORKSPACE/output/ || echo "输出目录为空或不存在"
+          cp /tmp/horizon/output/* $GITHUB_WORKSPACE/output/ 2>/dev/null || true
+          ls -la $GITHUB_WORKSPACE/output/
 
-      # 9. 上传到 Artifacts (保留 7 天)
+      # 8. 上传 Artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -144,20 +114,17 @@ jobs:
           path: output/
           retention-days: 7
 
-      # 10. 发送到飞书 (如果配置了 webhook)
+      # 9. 发送到飞书
       - name: Send to Feishu
-        if: env.FEISHU_WEBHOOK != ''
+        if: ${{ secrets.FEISHU_WEBHOOK != '' }}
         run: |
           if [ -f "$GITHUB_WORKSPACE/output/daily_report.md" ]; then
-            CONTENT=$(cat "$GITHUB_WORKSPACE/output/daily_report.md" | sed 's/"/\\"/g' | head -c 15000)
-            curl -X POST "$FEISHU_WEBHOOK" \
+            CONTENT=$(cat "$GITHUB_WORKSPACE/output/daily_report.md" | head -c 15000)
+            curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
               -H "Content-Type: application/json" \
               -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"${CONTENT}\"}}"
-          else
-            echo "日报文件未生成，跳过飞书通知"
           fi
 
-      # 11. 清理
+      # 10. 清理
       - name: Cleanup
-        run: |
-          rm -rf /tmp/horizon
+        run: rm -rf /tmp/horizon
