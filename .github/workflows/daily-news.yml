@@ -114,13 +114,13 @@ jobs:
           path: output/
           retention-days: 7
 
-      # 9. 发送到飞书
+      # 9. 发送到飞书 (如果配置了 webhook)
       - name: Send to Feishu
-        if: ${{ secrets.FEISHU_WEBHOOK != '' }}
+        if: env.FEISHU_WEBHOOK != ''
         run: |
           if [ -f "$GITHUB_WORKSPACE/output/daily_report.md" ]; then
             CONTENT=$(cat "$GITHUB_WORKSPACE/output/daily_report.md" | head -c 15000)
-            curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
+            curl -X POST "$FEISHU_WEBHOOK" \
               -H "Content-Type: application/json" \
               -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"${CONTENT}\"}}"
           fi
