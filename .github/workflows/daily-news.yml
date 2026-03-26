@@ -13,6 +13,15 @@ on:
         default: '24'
         type: string
 
+env:
+  # 从 Secrets 读取，如果不存在则为空字符串
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+  DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+  DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+
 jobs:
   generate-news:
     runs-on: ubuntu-latest
@@ -69,8 +78,8 @@ jobs:
               }
             },
             "ai": {
-              "provider": "gemini",
-              "model": "gemini-1.5-flash",
+              "provider": "${{ vars.AI_PROVIDER || 'gemini' }}",
+              "model": "${{ vars.AI_MODEL || 'gemini-1.5-flash' }}",
               "score_threshold": 6.0,
               "max_concurrent": 3
             },
@@ -88,12 +97,27 @@ jobs:
           }
           EOF
 
-      # 6. 检查 Secrets 是否配置
-      - name: Check secrets
+      # 6. 检查可用的 API Key
+      - name: Check API keys
         run: |
-          if [ -z "${{ secrets.GEMINI_API_KEY }}" ]; then
-            echo "⚠️ 警告: GEMINI_API_KEY 未配置，将只抓取新闻不进行 AI 评分"
-            echo "请在仓库 Settings -> Secrets -> Actions 中添加 GEMINI_API_KEY"
+          echo "检查可用的 AI API..."
+          if [ -n "$GEMINI_API_KEY" ]; then
+            echo "✓ Gemini API Key 已配置"
+          fi
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "✓ OpenAI API Key 已配置"
+          fi
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "✓ Anthropic API Key 已配置"
+          fi
+          if [ -n "$DEEPSEEK_API_KEY" ]; then
+            echo "✓ DeepSeek API Key 已配置"
+          fi
+          if [ -n "$DASHSCOPE_API_KEY" ]; then
+            echo "✓ DashScope API Key 已配置"
+          fi
+          if [ -z "$GEMINI_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$DEEPSEEK_API_KEY" ] && [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "⚠️ 警告: 未配置任何 AI API Key，将只抓取新闻不进行 AI 评分"
           fi
 
       # 7. 安装依赖并运行
@@ -101,11 +125,7 @@ jobs:
         run: |
           cd /tmp/horizon
           uv sync --frozen --no-dev
-          uv run horizon --hours ${{ github.event.inputs.hours || '24' }} || echo "Horizon 运行失败，可能是缺少 API Key"
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          uv run horizon --hours ${{ github.event.inputs.hours || '24' }} || echo "Horizon 运行完成或遇到错误"
 
       # 8. 保存生成的日报
       - name: Save output
@@ -113,7 +133,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/output
           cp /tmp/horizon/output/*.md $GITHUB_WORKSPACE/output/ 2>/dev/null || true
           cp /tmp/horizon/output/*.json $GITHUB_WORKSPACE/output/ 2>/dev/null || true
-          ls -la $GITHUB_WORKSPACE/output/ || echo "输出目录为空"
+          ls -la $GITHUB_WORKSPACE/output/ || echo "输出目录为空或不存在"
 
       # 9. 上传到 Artifacts (保留 7 天)
       - name: Upload artifacts
@@ -125,11 +145,11 @@ jobs:
 
       # 10. 发送到飞书 (如果配置了 webhook)
       - name: Send to Feishu
-        if: secrets.FEISHU_WEBHOOK != ''
+        if: env.FEISHU_WEBHOOK != ''
         run: |
           if [ -f "$GITHUB_WORKSPACE/output/daily_report.md" ]; then
             CONTENT=$(cat "$GITHUB_WORKSPACE/output/daily_report.md" | sed 's/"/\\"/g' | head -c 15000)
-            curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
+            curl -X POST "$FEISHU_WEBHOOK" \
               -H "Content-Type: application/json" \
               -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"${CONTENT}\"}}"
           else
