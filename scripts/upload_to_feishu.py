@@ -29,19 +29,24 @@ def create_document(token, title):
     if data.get('code') != 0:
         print(f"Create doc failed: {data}")
         return None
-    return data.get('data', {}).get('document', {}).get('document_token')
+    return data.get('data', {}).get('document', {}).get('document_id')
 
 def grant_permission(token, doc_token, owner_open_id):
     """授予用户编辑权限"""
     url = f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_token}/permissions"
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     payload = {
         "member_type": "openid",
         "member_id": owner_open_id,
         "perm": "full_access"
     }
-    resp = requests.post(url, headers=headers, json=payload)
-    return resp.json().get('code') == 0
+    try:
+        resp = requests.post(url, headers=headers, json=payload)
+        data = resp.json()
+        return data.get('code') == 0
+    except Exception as e:
+        print(f"Grant permission warning: {e}")
+        return False
 
 def write_content_blocks(token, doc_token, content):
     """写入文档内容（分批写入）"""
@@ -122,11 +127,6 @@ def main():
     report_file = os.environ.get('REPORT_FILE', 'output/horizon-daily.md')
     doc_title = os.environ.get('DOC_TITLE', f'Horizon Daily - {datetime.now().strftime("%Y-%m-%d")}')
     owner_open_id = os.environ.get('OWNER_OPEN_ID', 'ou_f80617e98f143959124726775f8ae7d7')
-    
-    print(f"DEBUG: REPORT_FILE={report_file}")
-    print(f"DEBUG: DOC_TITLE={doc_title}")
-    print(f"DEBUG: APP_ID exists={bool(app_id)}")
-    print(f"DEBUG: APP_SECRET exists={bool(app_secret)}")
     
     if not app_id or not app_secret:
         print("FEISHU_APP_ID and FEISHU_APP_SECRET required")
