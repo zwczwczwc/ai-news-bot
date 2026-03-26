@@ -1,0 +1,90 @@
+name: Daily Tech Giants News
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # 每天 UTC 1:00 (比 GitHub 晚1小时，确保顺序)
+  workflow_dispatch:
+
+env:
+  DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+  FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+  FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+
+jobs:
+  generate-tech-report:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Clone Horizon
+        run: git clone https://github.com/zwczwczwc/Horizon.git /tmp/horizon
+
+      - name: Create Tech Giants focused config
+        run: |
+          mkdir -p /tmp/horizon/data
+          cat > /tmp/horizon/data/config.json << 'EOF'
+          {
+            "version": "1.0",
+            "ai": {
+              "provider": "openai",
+              "model": "kimi-k2.5",
+              "api_key_env": "DASHSCOPE_API_KEY",
+              "base_url": "https://coding.dashscope.aliyuncs.com/v1",
+              "temperature": 0.3,
+              "max_tokens": 4096
+            },
+            "sources": {
+              "hackernews": {
+                "enabled": true,
+                "fetch_top_stories": 20,
+                "min_score": 50
+              },
+              "rss": [
+                {"name": "Google AI Blog", "url": "https://blog.google/technology/ai/rss/", "enabled": true},
+                {"name": "OpenAI Blog", "url": "https://openai.com/blog/rss.xml", "enabled": true},
+                {"name": "Anthropic News", "url": "https://www.anthropic.com/rss.xml", "enabled": true},
+                {"name": "Microsoft AI Blog", "url": "https://blogs.microsoft.com/ai/feed/", "enabled": true}
+              ],
+              "reddit": {"enabled": false},
+              "github": []
+            },
+            "filtering": {
+              "ai_score_threshold": 6.0,
+              "time_window_hours": 24
+            }
+          }
+          EOF
+
+      - name: Run Horizon
+        run: |
+          cd /tmp/horizon
+          uv sync --frozen --no-dev
+          uv run horizon
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+
+      - name: Save Tech Giants report
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/output
+          cp /tmp/horizon/data/summaries/*.md $GITHUB_WORKSPACE/output/tech-report.md
+          ls -la $GITHUB_WORKSPACE/output/
+
+      - name: Upload to Feishu (Tech Giants Section)
+        run: |
+          pip install requests
+          python3 scripts/merge_to_feishu.py "$GITHUB_WORKSPACE/output/tech-report.md" "tech"
+
+      - name: Cleanup
+        run: rm -rf /tmp/horizon
